@@ -8,6 +8,9 @@ class AudioManager {
 
   static Future<void> init() async {
     try {
+      // IMPORTANT: Set the correct audio assets path (assets/audios/ not assets/audio/)
+      FlameAudio.audioCache.prefix = 'assets/audios/';
+      
       if (kIsWeb) {
         // On web, don't pre-cache - just mark as initialized
         // We'll play audio directly when needed
@@ -28,6 +31,7 @@ class AudioManager {
           'fail.ogg',
           'Warning.ogg',
         ]);
+        debugPrint('AudioManager: Audio files cached successfully');
         _initialized = true;
       }
     } catch (e) {
