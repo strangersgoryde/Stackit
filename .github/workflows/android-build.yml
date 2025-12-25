@@ -1,0 +1,127 @@
+name: Android Build & Sign
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - develop
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+env:
+  FLUTTER_VERSION: '3.38.5'
+  JAVA_VERSION: '17'
+
+jobs:
+  build:
+    name: Build Signed APK & AAB
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: 'stable'
+          cache: true
+
+      - name: Verify Flutter Installation
+        run: |
+          flutter --version
+          flutter doctor -v
+
+      - name: Get Dependencies
+        run: flutter pub get
+
+      - name: Decode Keystore
+        env:
+          BARAKAH_BASE64_KEYSTORE: ${{ secrets.BARAKAH_BASE64_KEYSTORE }}
+        run: |
+          echo "$BARAKAH_BASE64_KEYSTORE" | base64 --decode > android/app/barakah-release.jks
+          echo "Keystore decoded successfully"
+
+      - name: Create key.properties
+        env:
+          BARAKAH_KEY_ALIAS: ${{ secrets.BARAKAH_KEY_ALIAS }}
+          BARAKAH_KEY_PASSWORD: ${{ secrets.BARAKAH_KEY_PASSWORD }}
+          BARAKAH_STORE_PASSWORD: ${{ secrets.BARAKAH_STORE_PASSWORD }}
+        run: |
+          cat > android/key.properties << EOF
+          storePassword=$BARAKAH_STORE_PASSWORD
+          keyPassword=$BARAKAH_KEY_PASSWORD
+          keyAlias=$BARAKAH_KEY_ALIAS
+          storeFile=barakah-release.jks
+          EOF
+          echo "key.properties created successfully"
+
+      - name: Build Release APK
+        run: flutter build apk --release
+
+      - name: Build Release APK (Split per ABI)
+        run: flutter build apk --release --split-per-abi
+
+      - name: Build Release AAB
+        run: flutter build appbundle --release
+
+      - name: Clean Up Keystore and Credentials
+        if: always()
+        run: |
+          rm -f android/app/barakah-release.jks
+          rm -f android/key.properties
+          echo "Sensitive files cleaned up"
+
+      - name: Upload Release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload Split APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-apk-split
+          path: |
+            build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+            build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
+            build/app/outputs/flutter-apk/app-x86_64-release.apk
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload Release AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-aab
+          path: build/app/outputs/bundle/release/app-release.aab
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Generate Build Summary
+        run: |
+          echo "## Build Artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### APK Files" >> $GITHUB_STEP_SUMMARY
+          ls -lh build/app/outputs/flutter-apk/*.apk 2>/dev/null | while read line; do
+            echo "- $line" >> $GITHUB_STEP_SUMMARY
+          done
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### AAB Files" >> $GITHUB_STEP_SUMMARY
+          ls -lh build/app/outputs/bundle/release/*.aab 2>/dev/null | while read line; do
+            echo "- $line" >> $GITHUB_STEP_SUMMARY
+          done
+
